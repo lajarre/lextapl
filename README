@@ -1,0 +1,7 @@
+todo
+----
+
+[ ] Read the corresponding OCaml code from TAPL.
+[ ] Integrate parsing.
+[ ] Write some unit tests.
+[ ] Have a working example (a mycode.mylanguage file which compiles).
