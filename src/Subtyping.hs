@@ -44,22 +44,33 @@ getTypeFromContext ctx i =
    VarBind ty -> Just ty
    _          -> Nothing
 
-subtype :: Type -> Type -> Bool
+subtype :: Type -> Type -> Maybe String
 subtype tyS tyT |
-  tyS == tyT = True
-subtype _ TyTop = True
-subtype TyBot _ = True
+  tyS == tyT = Nothing
+subtype _ TyTop = Nothing
+subtype TyBot _ = Nothing
 subtype (TyRecord fS) (TyRecord fT) =
-  all
-    (\ (li, tyTi) -> 
-      case lookup li fS of
-        Nothing -> False
-        Just tySi -> subtype tySi tyTi
-      )
-      fT
+  foldl
+  (\ acc (li, tyTi) -> 
+    case (acc, lookup li fS) of
+      (Nothing, Nothing)    -> Just $ "Subtyping error: record doesn't contain label(s): " ++ li
+      (Just err, Nothing)   -> Just $ err ++ ", " ++ li
+      (Nothing, Just tySi)  -> subtype tySi tyTi
+      (Just err, Just tySi) ->
+        maybe
+        (Just err)
+        (\ subErr -> Just $ err ++ ". With errors in item subtyping.\n" ++ subErr)
+        (subtype tySi tyTi)
+  )
+  Nothing
+  fT
 subtype (TyArr tyS1 tyS2) (TyArr tyT1 tyT2) =
-  subtype tyS1 tyT1 && subtype tyS2 tyT2
-subtype _ _ = False
+  case (subtype tyS1 tyT1, subtype tyS2 tyT2) of
+    (Nothing, Nothing) -> Nothing
+    (Just err, Nothing) -> Just $ "Subtyping error: Arrow type domain error\n" ++ err
+    (Nothing, Just err) -> Just $ "Subtyping error: Arrow type image error\n" ++ err
+    (Just err1, Just err2) -> Just $ "Subtyping error: Arrow type error domain and image error\n -" ++ err1 ++ "\n -" ++ err2
+subtype _ _ = Just "Subtyping error: types mismatch"
 
 join :: Type -> Type -> Type
 join TyBool TyBool = TyBool
@@ -155,9 +166,9 @@ typeOf ctx (TmAbs x tyT1 t2) =
 typeOf ctx (TmApp t1 t2) =
   case (tOf t1, tOf t2) of
     (Type (TyArr tyT11 tyT12), Type tyT2) ->
-      if tyT2 `subtype` tyT11
-         then Type tyT12
-         else TypeError "parameter type mismatch"
+      case tyT2 `subtype` tyT11 of
+         Nothing -> Type tyT12
+         Just subtypeErr -> TypeError $ "Parameter type mismatch\n" ++ subtypeErr
     (Type TyBot, _ )                      -> Type TyBot
     _                                     -> TypeError "arrow type expected"
   where tOf = typeOf ctx
