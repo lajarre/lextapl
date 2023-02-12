@@ -31,6 +31,7 @@ library
       Lib
       SimpleTypes
       Subtyping
+      SubtypingCoercion
   other-modules:
       Paths_lextapl
   hs-source-dirs:
