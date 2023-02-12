@@ -49,6 +49,12 @@ subtype tyS tyT |
   tyS == tyT = Nothing
 subtype _ TyTop = Nothing
 subtype TyBot _ = Nothing
+subtype (TyArr tyS1 tyS2) (TyArr tyT1 tyT2) =
+  case (subtype tyT1 tyS1, subtype tyS2 tyT2) of
+    (Nothing, Nothing) -> Nothing
+    (Just err, Nothing) -> Just $ "Subtyping error: Arrow type domain error\n" ++ err
+    (Nothing, Just err) -> Just $ "Subtyping error: Arrow type image error\n" ++ err
+    (Just err1, Just err2) -> Just $ "Subtyping error: Arrow type error domain and image error\n -" ++ err1 ++ "\n -" ++ err2
 subtype (TyRecord fS) (TyRecord fT) =
   foldl
   (\ acc (li, tyTi) -> 
@@ -64,12 +70,6 @@ subtype (TyRecord fS) (TyRecord fT) =
   )
   Nothing
   fT
-subtype (TyArr tyS1 tyS2) (TyArr tyT1 tyT2) =
-  case (subtype tyS1 tyT1, subtype tyS2 tyT2) of
-    (Nothing, Nothing) -> Nothing
-    (Just err, Nothing) -> Just $ "Subtyping error: Arrow type domain error\n" ++ err
-    (Nothing, Just err) -> Just $ "Subtyping error: Arrow type image error\n" ++ err
-    (Just err1, Just err2) -> Just $ "Subtyping error: Arrow type error domain and image error\n -" ++ err1 ++ "\n -" ++ err2
 subtype _ _ = Just "Subtyping error: types mismatch"
 
 join :: Type -> Type -> Type
@@ -129,6 +129,24 @@ meet (TyRecord fS) (TyRecord fT) =
 meet _ _ = Nothing
 
 typeOf :: Context -> Term -> Typing
+typeOf ctx (TmVar i _) = 
+  case getTypeFromContext ctx i of
+    Just ty -> Type ty
+    _       -> TypeError $ "variable " ++ show i ++ "not a binding (should not a variable binding)"
+typeOf ctx (TmAbs x tyT1 t2) =
+  case typeOf ctx' t2 of
+    Type tyT2         -> Type $ TyArr tyT1 tyT2
+    TypeError errMsg  -> TypeError $ "lambda " ++ x ++" term type error, see:\n\t" ++ errMsg
+  where ctx' = addBinding ctx x (VarBind tyT1)
+typeOf ctx (TmApp t1 t2) =
+  case (tOf t1, tOf t2) of
+    (Type (TyArr tyT11 tyT12), Type tyT2) ->
+      case tyT2 `subtype` tyT11 of
+         Nothing          -> Type tyT12
+         Just subtypeErr  -> TypeError $ "Parameter type mismatch\n" ++ subtypeErr
+    (Type TyBot, _ )                      -> Type TyBot
+    _                                     -> TypeError "arrow type expected"
+  where tOf = typeOf ctx
 typeOf ctx (TmRecord fields) =
   either
   TypeError 
@@ -153,25 +171,7 @@ typeOf ctx (TmProj t1 l) =
       where typeLookup = lookup l fieldTypes
     Type TyBot                  -> Type TyBot
     TypeError errMsg            -> TypeError errMsg
-    _ -> TypeError "projection on non-record"
-typeOf ctx (TmVar i _) = 
-  case getTypeFromContext ctx i of
-    Just ty -> Type ty
-    _       -> TypeError $ "variable " ++ show i ++ "not a binding (should not a variable binding)"
-typeOf ctx (TmAbs x tyT1 t2) =
-  case typeOf ctx' t2 of
-    Type tyT2         -> Type $ TyArr tyT1 tyT2
-    TypeError errMsg  -> TypeError $ "lambda " ++ x ++" term type error, see:\n\t" ++ errMsg
-  where ctx' = addBinding ctx x (VarBind tyT1)
-typeOf ctx (TmApp t1 t2) =
-  case (tOf t1, tOf t2) of
-    (Type (TyArr tyT11 tyT12), Type tyT2) ->
-      case tyT2 `subtype` tyT11 of
-         Nothing -> Type tyT12
-         Just subtypeErr -> TypeError $ "Parameter type mismatch\n" ++ subtypeErr
-    (Type TyBot, _ )                      -> Type TyBot
-    _                                     -> TypeError "arrow type expected"
-  where tOf = typeOf ctx
+    _                           -> TypeError "projection on non-record"
 typeOf ctx TmTrue = Type TyBool
 typeOf ctx TmFalse = Type TyBool
 typeOf ctx (TmIf t1 t2 t3) =
